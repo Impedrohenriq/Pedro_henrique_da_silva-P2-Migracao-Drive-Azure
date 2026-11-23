@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Migração Drive → Azure | Pedro_henrique_da_silva</title>
+<style>
+  :root{--bg:#f4f6f9;--card:#fff;--tx:#1b2430;--mut:#5f6b7a;--bd:#dde3ea;--az:#0078d4;--gd:#1a8f4a;--ok:#1a7f37;--er:#c62828;--run:#b26a00}
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.45 "Segoe UI",system-ui,sans-serif;background:var(--bg);color:var(--tx)}
+  header{background:#0f1c2e;color:#fff;padding:18px 24px}
+  header h1{margin:0;font-size:20px;font-weight:600}
+  header p{margin:4px 0 0;color:#aab6c5;font-size:13px}
+  main{max-width:1200px;margin:0 auto;padding:20px 16px 40px}
+  .cfg{display:flex;flex-wrap:wrap;gap:8px 24px;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px 16px;font-size:13px;color:var(--mut)}
+  .cfg b{color:var(--tx);font-weight:600}
+  .acoes{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0;align-items:center}
+  input{flex:1;min-width:260px;padding:9px 12px;border:1px solid var(--bd);border-radius:6px;font:inherit}
+  button{padding:9px 16px;border:0;border-radius:6px;font:inherit;font-weight:600;cursor:pointer;color:#fff}
+  button:disabled{opacity:.55;cursor:wait}
+  .b-gd{background:var(--gd)}.b-az{background:var(--az)}.b-mg{background:#5b2bb5}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:860px){.grid{grid-template-columns:1fr}}
+  section{background:var(--card);border:1px solid var(--bd);border-radius:8px;overflow:hidden}
+  section h2{margin:0;padding:12px 16px;font-size:15px;border-bottom:1px solid var(--bd);display:flex;justify-content:space-between}
+  section h2 span{font-weight:400;color:var(--mut)}
+  .h-gd{border-top:4px solid var(--gd)}.h-az{border-top:4px solid var(--az)}.h-mg{border-top:4px solid #5b2bb5}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:7px 12px;text-align:left;border-bottom:1px solid var(--bd);word-break:break-all}
+  th{background:#f8fafc;color:var(--mut);font-weight:600}
+  td.n{text-align:right;white-space:nowrap}
+  .vazio{padding:18px;color:var(--mut);text-align:center}
+  .st{font-weight:700}.st.sucesso{color:var(--ok)}.st.erro{color:var(--er)}
+  #console{margin:0;background:#0b1220;color:#cfe3ff;font:12px/1.5 Consolas,monospace;padding:12px 16px;max-height:260px;overflow:auto;white-space:pre-wrap}
+  #console .ok{color:#6fdc8c}#console .er{color:#ff8a80}#console .in{color:#7fd3ff}
+  .resumo{padding:10px 16px;font-weight:600}
+  footer{text-align:center;color:var(--mut);font-size:12px;margin-top:24px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Migração de Arquivos: Google Drive → Azure Blob Storage</h1>
+  <p>P2 · Computação em Nuvem II · FATEC Cotia · Aluno: <b>Pedro_henrique_da_silva</b></p>
+</header>
+<main>
+  <div class="cfg" id="cfg">Carregando configuração…</div>
+
+  <div class="acoes">
+    <input id="folder" placeholder="ID da pasta do Google Drive">
+    <button class="b-gd" id="btnOrigem">Listar origem (Drive)</button>
+    <button class="b-az" id="btnDestino">Listar destino (Blob)</button>
+    <button class="b-mg" id="btnMigrar">Migrar arquivos</button>
+  </div>
+
+  <div class="grid">
+    <section class="h-gd"><h2>Origem · Google Drive <span id="qOrigem"></span></h2><div id="origem"><div class="vazio">Clique em “Listar origem”.</div></div></section>
+    <section class="h-az"><h2>Destino · Azure Blob Storage <span id="qDestino"></span></h2><div id="destino"><div class="vazio">Clique em “Listar destino”.</div></div></section>
+  </div>
+
+  <section class="h-mg" style="margin-top:16px">
+    <h2>Status das transferências <span id="qMig"></span></h2>
+    <div id="mig"><div class="vazio">Nenhuma migração executada ainda.</div></div>
+    <div class="resumo" id="resumo"></div>
+    <pre id="console"></pre>
+  </section>
+  <footer>Pedro_henrique_da_silva · Node.js · Google Drive API v3 (Service Account) · Azure Storage Blob SDK (Connection String)</footer>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const kb = (n) => n == null ? '—' : n < 1024 ? n + ' B' : (n / 1024).toFixed(1) + ' KB';
+const dt = (d) => d ? new Date(d).toLocaleString('pt-BR') : '—';
+
+function cons(msg, cls = '') {
+  const t = new Date().toLocaleTimeString('pt-BR');
+  $('console').insertAdjacentHTML('beforeend', `<span class="${cls}">[${t}] ${esc(msg)}</span>\n`);
+  $('console').scrollTop = 1e9;
+  console.log(`[${t}] ${msg}`);
+}
+function tabela(cols, rows) {
+  if (!rows.length) return '<div class="vazio">Nenhum arquivo.</div>';
+  return `<table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${
+    rows.map(r => `<tr>${cols.map(c => `<td class="${c[2]||''}">${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+const qs = () => '?folderId=' + encodeURIComponent($('folder').value.trim());
+
+async function carregarConfig() {
+  const c = await (await fetch('/api/config')).json();
+  $('folder').value = c.folderId || '';
+  $('cfg').innerHTML = `<div>Aluno: <b>${esc(c.aluno)}</b></div><div>Service Account: <b>${esc(c.serviceAccount)}</b></div>
+    <div>Storage Account: <b>${esc(c.storageAccount)}</b></div><div>Container: <b>${esc(c.container)}</b></div>`;
+}
+async function listarOrigem() {
+  $('btnOrigem').disabled = true; cons('Listando arquivos da origem (Google Drive)…', 'in');
+  try {
+    const r = await fetch('/api/origem' + qs()); const d = await r.json(); if (!r.ok) throw new Error(d.erro);
+    $('qOrigem').textContent = d.length + ' arquivo(s)';
+    $('origem').innerHTML = tabela([['Nome', f => esc(f.nome)], ['Tipo', f => esc(f.mimeType)], ['Tamanho', f => kb(f.tamanho), 'n'], ['Modificado', f => dt(f.modificado)]], d);
+    cons(`Origem: ${d.length} arquivo(s) encontrado(s)`, 'ok');
+  } catch (e) { cons('Erro ao listar origem: ' + e.message, 'er'); }
+  $('btnOrigem').disabled = false;
+}
+async function listarDestino() {
+  $('btnDestino').disabled = true; cons('Listando blobs do destino (Azure Blob Storage)…', 'in');
+  try {
+    const r = await fetch('/api/destino'); const d = await r.json(); if (!r.ok) throw new Error(d.erro);
+    $('qDestino').textContent = d.length + ' blob(s)';
+    $('destino').innerHTML = tabela([['Nome', b => esc(b.nome)], ['Tipo', b => esc(b.mimeType)], ['Tamanho', b => kb(b.tamanho), 'n'], ['Modificado', b => dt(b.modificado)]], d);
+    cons(`Destino: ${d.length} blob(s) no container`, 'ok');
+  } catch (e) { cons('Erro ao listar destino: ' + e.message, 'er'); }
+  $('btnDestino').disabled = false;
+}
+async function migrar() {
+  $('btnMigrar').disabled = true; $('resumo').textContent = '';
+  const itens = []; const render = () => {
+    $('qMig').textContent = itens.length + ' processado(s)';
+    $('mig').innerHTML = tabela([['#', (r) => itens.indexOf(r) + 1], ['Arquivo', r => esc(r.arquivo)],
+      ['Status', r => `<span class="st ${r.status}">${r.status === 'sucesso' ? '✔ SUCESSO' : '✖ ERRO'}</span>`],
+      ['Detalhe', r => r.status === 'sucesso' ? kb(r.tamanho) + ' · ' + r.ms + ' ms' : esc(r.erro)]], itens);
+  };
+  cons('Iniciando migração Google Drive → Azure Blob…', 'in');
+  try {
+    const r = await fetch('/api/migrar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId: $('folder').value.trim() }) });
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true }); let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const linha = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!linha) continue;
+        const m = JSON.parse(linha);
+        if (m.tipo === 'arquivo') { itens.push(m); render();
+          cons(m.status === 'sucesso' ? `SUCESSO: ${m.arquivo} (${kb(m.tamanho)})` : `ERRO: ${m.arquivo} -> ${m.erro}`, m.status === 'sucesso' ? 'ok' : 'er'); }
+        else if (m.tipo === 'resumo') { $('resumo').textContent = `Concluído: ${m.total} arquivo(s) · ${m.sucesso} sucesso(s) · ${m.erro} erro(s)`;
+          cons(`Migração concluída: ${m.sucesso} sucesso(s), ${m.erro} erro(s)`, m.erro ? 'er' : 'ok'); }
+        else if (m.tipo === 'falha') cons('Falha na migração: ' + m.erro, 'er');
+      }
+    }
+  } catch (e) { cons('Erro: ' + e.message, 'er'); }
+  $('btnMigrar').disabled = false; listarDestino();
+}
+$('btnOrigem').onclick = listarOrigem; $('btnDestino').onclick = listarDestino; $('btnMigrar').onclick = migrar;
+carregarConfig().then(() => { listarOrigem(); listarDestino(); });
+</script>
+</body>
+</html>
